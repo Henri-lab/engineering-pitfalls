@@ -1,0 +1,3 @@
+interface:
+  display_name: "细碎工程踩坑库"
+  short_description: "跨项目积累 shell/部署/SQL 这类单点小坑，避免重复踩"
