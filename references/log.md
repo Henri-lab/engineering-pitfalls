@@ -799,3 +799,24 @@
   收到响应立即换新键；服务端 `UNIQUE(user_id, client_request_id)` + 返回首次结果 + 保留 24~72h
 - 教训：刷新不该产生新意图；跨标签页/跨设备/长时间跨度由"业务相似单检测"兜底，不是幂等键的活
 - 分层：其他
+
+### E-115 VS Code Remote 的 server 断开后不会退出，会一直占磁盘和内存
+
+- 场景：用 VS Code Remote-SSH 连服务器改代码，改完关窗口、断开 SSH。
+- 现象：几小时后 `ps` 里仍有 6 个 `vscode-server` 进程（最大的 82MB RSS），但 `who` 没有任何登录用户、
+  `ss -tnp | grep -E 'node|vscode'` 也没有 ESTAB 连接——进程却一直活着。
+  同时 `~/.vscode-server` 占 **2.7GB 磁盘**。在一台 1.8G 内存的机器上，这批残留把可用内存压到 OOM 边缘，
+  内核 24 小时内把 `openclaw-gateway` 杀了 6 次（systemd 反复拉起又被杀）。
+- 根因：VS Code Remote **断开连接不杀 server**，为的是下次"秒连"复用已启动的 server 与扩展宿主。
+  所以"关窗口 / 断 SSH / 合上笔记本"都不等于释放资源。
+- 修法：
+  - VS Code 命令面板 → **Remote: Kill VS Code Server on Host**（推荐，进程和目录一起清）
+  - 或手动：`pkill -f vscode-server && rm -rf ~/.vscode-server`
+  - 排查残留：`ps -eo rss,etime,cmd | grep vscode-server`、`du -sh ~/.vscode-server`
+  - 判断是不是孤儿：`who` 为空 且 `ss -tnp | grep -E 'node|vscode'` 无 ESTAB
+- 教训：
+  - 在**小内存云主机**上，Remote-SSH 要当成"会常驻的服务"来管理，用完主动 kill，别指望断连接就释放。
+  - **磁盘和内存是两个数**：2.7GB 是 `du -sh ~/.vscode-server` 的磁盘体积，进程 RSS 只有约 175MB；
+    `ps` 的 VSZ（Node 常见 10GB+ total-vm）更不代表实际占用——看 RSS / `free -m` / `docker stats`。
+  - 清理后立刻验证：`free -m` 看可用内存、`journalctl --since "5 min ago" | grep -c oom-kill` 应为 0。
+- 分层：toolchain/network
